@@ -1,0 +1,36 @@
+PLAY MUSICA - JUKEBOX KARAOKE
+=============================
+Estrutura:
+  jukebox/
+    index.html
+    INICIAR.bat   <- DE DOIS CLIQUES AQUI PARA ABRIR (atualiza a lista e abre o jukebox)
+    atualizar.ps1   (usado pelo INICIAR.bat, nao apague)
+    musicas/        <- genero / album / arquivos de musica
+    imagem/         <- imagens com o nome da banda/album
+
+COMO COLOCAR UMA MUSICA (JEITO MAIS SIMPLES)
+1) Dentro de "musicas" crie UMA PASTA com o nome do artista/CD (ex.: Mastruz com Leite).
+2) Coloque os arquivos de musica dentro dela.
+3) (Opcional) Coloque a capa na pasta "imagem" com o mesmo nome da pasta (ex.: imagem/Mastruz com Leite.jpg).
+4) De dois cliques em INICIAR.bat. Todas as pastas aparecem juntas na categoria "Todas".
+
+COMO COLOCAR COM GENERO (OPCIONAL)
+1) Dentro de "musicas" crie a pasta do GENERO (ex.: Arrocha).
+2) Dentro do genero crie a pasta do ALBUM/BANDA (ex.: Mastruz com Leite).
+3) Coloque os arquivos de musica dentro do album (ex.: 01 - Coisa Nossa.mp3).
+   Exemplo completo:
+     musicas/Arrocha/Mastruz com Leite/01 - Coisa Nossa.mp3
+4) Coloque a imagem na pasta "imagem" com o nome da banda/album:
+     imagem/Mastruz com Leite.jpg
+5) De dois cliques em INICIAR.bat. Ele le as pastas, abre o navegador em tela cheia,
+   mostra o logo Play Musica e entra direto na tela das musicas.
+   (Use SEMPRE o INICIAR.bat para abrir, assim musicas novas aparecem sozinhas.)
+   Dica: crie um atalho do INICIAR.bat na area de trabalho ou na pasta Inicializar do Windows
+   para abrir quando ligar o computador.
+
+Obs.: se o Windows avisar sobre o INICIAR.bat, clique em "Mais informacoes" e "Executar assim mesmo".
+Use Chrome ou Edge.
+
+BIBLIOTECAS (pendrive/HD) - somente na versao ISO/Linux
+Configuracoes (engrenagem ou F2) > Bibliotecas: lista o "Sistema (local)" e cada pendrive/HD plugado.
+No Windows, a lista mostra so o local; use "Escolher pasta".

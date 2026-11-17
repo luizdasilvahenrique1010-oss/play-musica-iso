@@ -1,0 +1,59 @@
+# --- Tela / navegador (modo quiosque) ---
+xorg
+xinit
+xserver-xorg-legacy
+xserver-xorg-video-all
+xserver-xorg-input-all
+x11-xserver-utils
+openbox
+unclutter
+dbus-x11
+chromium
+chromium-l10n
+chromium-sandbox
+# --- Audio ---
+pulseaudio
+pulseaudio-utils
+alsa-utils
+# --- Video / codecs / aceleracao de GPU ---
+ffmpeg
+mesa-va-drivers
+mesa-vdpau-drivers
+mesa-vulkan-drivers
+libgl1-mesa-dri
+va-driver-all
+vdpau-driver-all
+i965-va-driver
+intel-media-va-driver-non-free
+# --- Firmwares (drivers de placas de som, video, rede) ---
+firmware-linux
+firmware-linux-nonfree
+firmware-misc-nonfree
+firmware-realtek
+firmware-amd-graphics
+firmware-intel-sound
+firmware-sof-signed
+firmware-iwlwifi
+firmware-atheros
+firmware-brcm80211
+intel-microcode
+amd64-microcode
+# --- Pendrive / HD externo (NTFS, exFAT, FAT, ext4) ---
+ntfs-3g
+exfatprogs
+exfat-fuse
+dosfstools
+# --- Sistema ---
+python3
+locales
+console-setup
+keyboard-configuration
+sudo
+usbutils
+pciutils
+kbd
+# --- Fontes (simbolos ♪ ⏯ ⏭ ⛶) ---
+fonts-dejavu
+fonts-liberation
+fonts-noto-core
+fonts-noto-color-emoji

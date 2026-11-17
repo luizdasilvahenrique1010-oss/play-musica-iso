@@ -1,0 +1,175 @@
+#!/usr/bin/env python3
+# Serviço local (127.0.0.1:8765, roda como root). O jukebox consulta aqui:
+#   /api/fontes            -> sistema local + pendrives/HDs plugados (monta em modo leitura)
+#   /api/carregar?id=XXXX  -> lista de arquivos de música/imagem daquela fonte
+import os, sys, json, re, subprocess, unicodedata, threading
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+ROOT = os.environ.get('JUKEBOX_ROOT', '/opt/jukebox')
+MNT = os.environ.get('JUKEBOX_MNT', '/mnt')
+PORT = int(os.environ.get('JUKEBOX_PORT', '8765'))
+EXT = {'.mp3','.wav','.ogg','.oga','.m4a','.aac','.flac','.opus','.wma','.mp4','.m4v','.webm','.mkv','.mov','.avi',
+       '.mpg','.mpeg','.3gp','.ogv','.wmv','.jpg','.jpeg','.png','.webp','.gif','.bmp'}
+FS_OK = {'vfat','exfat','ntfs','ntfs3','ext2','ext3','ext4'}
+SKIP_ROOT = {'system volume information','$recycle.bin','windows','program files','program files (x86)','programdata','recovery'}
+MAXF = 60000
+LOCK = threading.Lock()
+
+def norm(s):
+    return ''.join(c for c in unicodedata.normalize('NFD', s) if unicodedata.category(c) != 'Mn').lower()
+
+def run(cmd):
+    try: return subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except Exception: return subprocess.CompletedProcess(cmd, 1, '', '')
+
+def mounts():
+    m = {}
+    try:
+        for line in open('/proc/mounts'):
+            p = line.split(); m[p[1].replace('\\040', ' ')] = p[0]
+    except Exception: pass
+    return m
+
+def live_device():
+    m = mounts()
+    return m.get('/run/live/medium') or m.get('/lib/live/mount/medium')
+
+def walk_devs(devs, pai=None):
+    for d in devs:
+        d['_tran'] = d.get('tran') or (pai or {}).get('_tran')
+        d['_model'] = d.get('model') or (pai or {}).get('_model')
+        yield d
+        yield from walk_devs(d.get('children') or [], d)
+
+def dispositivos():
+    r = run(['lsblk', '-J', '-p', '-o', 'NAME,TYPE,FSTYPE,LABEL,SIZE,MOUNTPOINT,TRAN,MODEL'])
+    try: devs = json.loads(r.stdout)['blockdevices']
+    except Exception: return []
+    live = live_device(); out = []
+    for d in walk_devs(devs):
+        if d.get('type') not in ('part', 'disk') or d.get('fstype') not in FS_OK or d['name'] == live: continue
+        d['id'] = re.sub(r'[^a-z0-9]', '', os.path.basename(d['name']).lower())
+        out.append(d)
+    return out
+
+def montar(d):
+    mp = d.get('mountpoint')
+    if mp and not mp.startswith('['): return mp
+    mp = os.path.join(MNT, 'fonte-' + d['id'])
+    if mp in mounts(): return mp
+    os.makedirs(mp, exist_ok=True)
+    fs = d['fstype']; name = d['name']
+    ro = 'ro,iocharset=utf8' if fs == 'vfat' else 'ro'
+    tent = []
+    if fs in ('ntfs', 'ntfs3'): tent.append(['mount', '-t', 'ntfs-3g', '-o', 'ro', name, mp])
+    tent.append(['mount', '-o', ro, name, mp])
+    if fs in ('ntfs', 'ntfs3'): tent.append(['mount', '-t', 'ntfs3', '-o', 'ro,iocharset=utf8', name, mp])
+    for c in tent:
+        if run(c).returncode == 0: return mp
+    try: os.rmdir(mp)
+    except OSError: pass
+    return None
+
+def achar(base, alvo):
+    try:
+        for e in os.listdir(base):
+            if norm(e) == alvo and os.path.isdir(os.path.join(base, e)): return os.path.join(base, e)
+    except Exception: pass
+    return None
+
+def limpar_orfaos(ids):
+    for mp in list(mounts()):
+        if mp.startswith(os.path.join(MNT, 'fonte-')) and mp.split('fonte-', 1)[1] not in ids:
+            run(['umount', '-l', mp])
+            try: os.rmdir(mp)
+            except OSError: pass
+    try:
+        for n in os.listdir(ROOT):
+            if n.startswith('fonte-') and n[6:] not in ids: limpar_fonte(n)
+    except Exception: pass
+
+def limpar_fonte(n):
+    p = os.path.join(ROOT, n)
+    if os.path.islink(p): os.unlink(p); return
+    if os.path.isdir(p):
+        for s in os.listdir(p):
+            sp = os.path.join(p, s)
+            if os.path.islink(sp): os.unlink(sp)
+        try: os.rmdir(p)
+        except OSError: pass
+
+def varrer(base, skip_sys=False):
+    lista = []
+    for dp, dns, fns in os.walk(base, followlinks=True):
+        dns[:] = [x for x in dns if not x.startswith('.') and not x.startswith('fonte-') and not (dp == ROOT and x == 'som')
+                  and not (skip_sys and dp == base and x.lower() in SKIP_ROOT)]
+        for fn in fns:
+            if fn.startswith('.'): continue
+            if os.path.splitext(fn)[1].lower() in EXT:
+                lista.append(os.path.relpath(os.path.join(dp, fn), ROOT).replace(os.sep, '/'))
+                if len(lista) >= MAXF: return sorted(lista)
+    return sorted(lista)
+
+def fontes():
+    with LOCK:
+        devs = dispositivos()
+        limpar_orfaos({d['id'] for d in devs})
+        loc = achar(ROOT, 'musicas')
+        out = [{'id': 'local', 'nome': 'Sistema (local)', 'tipo': 'local',
+                'detalhe': 'Músicas gravadas neste computador / na ISO', 'temMusicas': bool(loc and os.listdir(loc))}]
+        for d in devs:
+            mp = montar(d)
+            if not mp: continue
+            usb = d['_tran'] == 'usb'
+            nome = (d.get('label') or d['_model'] or d['name']).strip()
+            out.append({'id': d['id'], 'nome': nome, 'tipo': 'usb' if usb else 'disco',
+                        'detalhe': '%s • %s • %s • %s' % ('Pendrive/USB' if usb else 'Disco', d.get('size') or '?', d['fstype'], d['name']),
+                        'temMusicas': bool(achar(mp, 'musicas'))})
+        return out
+
+def carregar(id_):
+    with LOCK:
+        if id_ == 'local': return varrer(ROOT)
+        d = next((x for x in dispositivos() if x['id'] == id_), None)
+        if not d: raise KeyError(id_)
+        mp = montar(d)
+        if not mp: raise RuntimeError('nao montou')
+        for n in os.listdir(ROOT):
+            if n.startswith('fonte-'): limpar_fonte(n)
+        dest = os.path.join(ROOT, 'fonte-' + id_)
+        os.makedirs(dest, exist_ok=True)
+        mus = achar(mp, 'musicas')
+        os.symlink(mus or mp, os.path.join(dest, 'musicas'))
+        img = achar(mp, 'imagem') or achar(mp, 'imagens')
+        if img and mus: os.symlink(img, os.path.join(dest, 'imagem'))
+        return varrer(dest, skip_sys=not mus)
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a): pass
+    def _cors(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Private-Network', 'true')
+        self.send_header('Access-Control-Allow-Methods', 'GET, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', '*')
+    def do_OPTIONS(self):
+        self.send_response(204); self._cors(); self.end_headers()
+    def _json(self, code, obj):
+        b = json.dumps(obj, ensure_ascii=False).encode('utf-8')
+        self.send_response(code); self._cors()
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
+        self.send_header('Content-Length', str(len(b))); self.send_header('Cache-Control', 'no-store')
+        self.end_headers(); self.wfile.write(b)
+    def do_GET(self):
+        u = urlparse(self.path)
+        try:
+            if u.path == '/api/fontes': self._json(200, fontes())
+            elif u.path == '/api/carregar':
+                id_ = re.sub(r'[^a-z0-9]', '', (parse_qs(u.query).get('id') or [''])[0].lower())
+                self._json(200, {'lista': carregar(id_)})
+            else: self._json(404, {'erro': 'nao encontrado'})
+        except KeyError: self._json(404, {'erro': 'fonte nao encontrada'})
+        except Exception as e: self._json(500, {'erro': str(e)})
+
+if __name__ == '__main__':
+    ThreadingHTTPServer(('127.0.0.1', PORT), H).serve_forever()

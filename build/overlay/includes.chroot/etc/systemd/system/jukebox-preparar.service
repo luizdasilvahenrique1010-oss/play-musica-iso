@@ -1,0 +1,11 @@
+[Unit]
+Description=Prepara a biblioteca do Jukebox (monta discos e gera biblioteca.js)
+After=local-fs.target systemd-udevd.service live-config.service
+Before=getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/jukebox-preparar
+
+[Install]
+WantedBy=multi-user.target

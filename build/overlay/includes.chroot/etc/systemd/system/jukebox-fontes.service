@@ -1,0 +1,11 @@
+[Unit]
+Description=Jukebox - servico de bibliotecas (pendrives e discos)
+After=local-fs.target systemd-udevd.service
+
+[Service]
+ExecStart=/usr/local/bin/jukebox-fontes
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
