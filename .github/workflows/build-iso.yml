@@ -1,0 +1,65 @@
+name: Gerar ISO do Play Musica
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths-ignore: ['**.md']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Liberar espaço em disco
+        run: |
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
+          sudo docker image prune --all --force || true
+          df -h /
+
+      - name: Baixar músicas de um link (opcional)
+        env:
+          MUSICAS_ZIP_URL: ${{ vars.MUSICAS_ZIP_URL }}
+        run: |
+          if [ -n "$MUSICAS_ZIP_URL" ]; then
+            curl -L --fail --retry 3 -o /tmp/musicas.zip "$MUSICAS_ZIP_URL"
+            unzip -q -o /tmp/musicas.zip -d jukebox/
+            rm -f /tmp/musicas.zip
+          else
+            echo "Sem MUSICAS_ZIP_URL: usando só o que está na pasta jukebox/ do repositório."
+          fi
+          du -sh jukebox || true
+
+      - name: Montar a ISO (baixa drivers, codecs e firmwares do Debian)
+        run: |
+          docker run --rm --privileged -v "$PWD":/work -w /work debian:bookworm bash -c '
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y live-build debootstrap xorriso squashfs-tools syslinux syslinux-common isolinux \
+              grub-efi-amd64-bin grub-pc-bin mtools dosfstools ca-certificates gnupg
+            bash build/build.sh
+          '
+
+      - name: Publicar em Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="iso-$(date +%Y%m%d-%H%M)-${{ github.run_number }}"
+          cd out
+          FILES="PlayMusica.iso.sha256"
+          SIZE=$(stat -c %s PlayMusica.iso)
+          if [ "$SIZE" -gt 2000000000 ]; then
+            split -b 1900M -d PlayMusica.iso PlayMusica.iso.parte
+            FILES="$FILES $(ls PlayMusica.iso.parte*)"
+            NOTA="ISO maior que 2 GB, dividida em partes. Junte no Windows: copy /b PlayMusica.iso.parte00+PlayMusica.iso.parte01 PlayMusica.iso (liste todas as partes em ordem)."
+          else
+            FILES="$FILES PlayMusica.iso"
+            NOTA="Grave a ISO no pendrive com Rufus (modo DD) ou Ventoy."
+          fi
+          gh release create "$TAG" $FILES --title "Play Musica ISO $TAG" --notes "$NOTA"
